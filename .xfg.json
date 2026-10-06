@@ -37,7 +37,6 @@
         ".golangci.yml",
         ".hadolint.yaml",
         ".jsonlintrc",
-        ".lint-config.sh",
         ".lycheeignore",
         ".markdownlint.json",
         ".markdownlintignore",
