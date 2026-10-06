@@ -29,11 +29,15 @@
         ".github/CODEOWNERS",
         ".github/renovate.json5",
         ".github/workflows/ci.yaml",
+        ".github/workflows/rebuild-release.yaml",
+        ".github/workflows/release-please.yaml",
         ".github/workflows/trivy-scan.yaml",
         ".gitignore",
         ".gitleaks.toml",
+        ".golangci.yml",
         ".hadolint.yaml",
         ".jsonlintrc",
+        ".lint-config.sh",
         ".lycheeignore",
         ".markdownlint.json",
         ".markdownlintignore",
@@ -52,7 +56,6 @@
         ".vscode/settings.json",
         ".yamllint.yml",
         "LICENSE",
-        "lint-config.sh",
         "lint.sh",
         "trivy-mega-linter.yaml"
       ]

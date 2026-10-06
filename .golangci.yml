@@ -1,25 +1,28 @@
+# yaml-language-server: $schema=https://golangci-lint.run/jsonschema/golangci.jsonschema.json
+# This file is automatically updated - do not modify directly
+
 version: "2"
 linters:
-  default: none
+  default: "none"
   enable:
-    - errcheck
-    - gocritic
-    - govet
-    - ineffassign
-    - staticcheck
-    - unused
+    - "errcheck"
+    - "gocritic"
+    - "govet"
+    - "ineffassign"
+    - "staticcheck"
+    - "unused"
   exclusions:
-    generated: lax
+    generated: "lax"
     presets:
-      - comments
-      - common-false-positives
-      - legacy
-      - std-error-handling
+      - "comments"
+      - "common-false-positives"
+      - "legacy"
+      - "std-error-handling"
 formatters:
   enable:
-    - gofmt
-    - goimports
+    - "gofmt"
+    - "goimports"
   settings:
     goimports:
       local-prefixes:
-        - github.com/anthony-spruyt/kata-tap-qdisc-fix
+        - "github.com/anthony-spruyt/kata-tap-qdisc-fix"
