@@ -9,8 +9,10 @@ EXTENDS:
 CONFIG_PROPERTIES_TO_APPEND:
   - ENABLE_LINTERS
   - ADDITIONAL_EXCLUDED_DIRECTORIES
-ENABLE_LINTERS:
-  - GO_GOLANGCI_LINT
+# Add project-specific linters below:
+# ENABLE_LINTERS:
+#   - TYPESCRIPT_ES
+#   - PYTHON_PYLINT
 # Exclude more directories without dropping the base ones:
 # ADDITIONAL_EXCLUDED_DIRECTORIES:
 #   - generated
