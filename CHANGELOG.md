@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.0 (2026-10-06)
+
+
+### Code Refactoring
+
+* standard Go layout and shared CI/release workflows ([#5](https://github.com/anthony-spruyt/kata-tap-qdisc-fix/issues/5)) ([aadc5dc](https://github.com/anthony-spruyt/kata-tap-qdisc-fix/commit/aadc5dcba97ca9ca1296e39b6468a15c29939f1f))
+
 ## [0.2.14](https://github.com/anthony-spruyt/spruyt-labs/compare/kata-tap-qdisc-fix/v0.2.13...kata-tap-qdisc-fix/v0.2.14) (2026-09-19)
 
 
