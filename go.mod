@@ -1,4 +1,4 @@
-module github.com/anthony-spruyt/spruyt-labs/cmd/kata-tap-qdisc-fix
+module github.com/anthony-spruyt/kata-tap-qdisc-fix
 
 go 1.27.1
 

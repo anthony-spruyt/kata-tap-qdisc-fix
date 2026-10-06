@@ -9,6 +9,13 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+
+	"github.com/anthony-spruyt/kata-tap-qdisc-fix/internal/config"
+	"github.com/anthony-spruyt/kata-tap-qdisc-fix/internal/metrics"
+	"github.com/anthony-spruyt/kata-tap-qdisc-fix/internal/netns"
+	"github.com/anthony-spruyt/kata-tap-qdisc-fix/internal/procscan"
+	"github.com/anthony-spruyt/kata-tap-qdisc-fix/internal/qdisc"
+	"github.com/anthony-spruyt/kata-tap-qdisc-fix/internal/server"
 )
 
 var (
@@ -19,12 +26,12 @@ var (
 func main() { os.Exit(run()) }
 
 func run() int {
-	cfg := LoadConfig()
+	cfg := config.Load()
 	if err := cfg.Validate(); err != nil {
 		slog.New(slog.NewJSONHandler(os.Stderr, nil)).Error("invalid config", "error", err.Error())
 		return 2
 	}
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: parseLevel(cfg.LogLevel)}))
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: config.ParseLevel(cfg.LogLevel)}))
 	logger.Info("kata-tap-qdisc-fix starting",
 		"version", version,
 		"commit", commit,
@@ -34,33 +41,29 @@ func run() int {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
-	// Capture host netns from the main goroutine BEFORE any worker starts.
-	if err := InitHostNetns(); err != nil {
+	if err := netns.InitHost(); err != nil {
 		logger.Error("init host netns", "error", err.Error())
 		return 3
 	}
 
-	// pid=0 → /proc/self/ns/net; avoids OCI spec masking of /proc/<other>/ns
-	// (container runs hostNetwork=true so self-netns = host-netns).
-	hostInode, err := HostNetnsInode("/proc", 0)
+	hostInode, err := procscan.HostNetnsInode("/proc", 0)
 	if err != nil {
 		logger.Error("read host netns inode", "error", err.Error())
 		return 3
 	}
 
 	reg := prometheus.NewRegistry()
-	metrics := NewMetrics(reg)
-	state := &readyState{}
+	m := metrics.New(reg)
+	ready := &server.Ready{}
 
-	stopHealth := startHealthServer(cfg.HealthPort, state, logger)
+	stopHealth := server.StartHealth(cfg.HealthPort, ready, logger)
 	defer stopHealth()
-	stopMetrics := startMetricsServer(cfg.MetricsPort, reg, logger)
+	stopMetrics := server.StartMetrics(cfg.MetricsPort, reg, logger)
 	defer stopMetrics()
 
-	opener := NewNetnsOpener()
-	scanner := NewProcScanner(opener, NewQdiscManager, cfg.DryRun, logger, hostInode, "/proc")
+	scanner := procscan.New(netns.NewOpener(), qdisc.NewManager, cfg.DryRun, logger, hostInode, "/proc")
 
-	state.markReady()
+	ready.MarkReady()
 
 	ticker := time.NewTicker(cfg.SweepInterval)
 	defer ticker.Stop()
@@ -68,13 +71,13 @@ func run() int {
 	runSweep := func() {
 		res, err := scanner.Sweep(ctx)
 		if err != nil {
-			metrics.ReplaceFailuresTotal.Inc()
+			m.ReplaceFailuresTotal.Inc()
 			logger.Error("sweep failed", "error", err.Error())
 			return
 		}
-		metrics.SweepsTotal.Inc()
+		m.SweepsTotal.Inc()
 		if res.Replaced > 0 {
-			metrics.ReplacementsTotal.Add(float64(res.Replaced))
+			m.ReplacementsTotal.Add(float64(res.Replaced))
 		}
 		logger.Debug("sweep ok",
 			"elapsed", res.Elapsed,
@@ -84,7 +87,7 @@ func run() int {
 			"taps_found", res.TapsFound)
 	}
 
-	runSweep() // initial sweep
+	runSweep()
 
 	for {
 		select {
@@ -95,18 +98,5 @@ func run() int {
 		case <-ticker.C:
 			runSweep()
 		}
-	}
-}
-
-func parseLevel(s string) slog.Level {
-	switch s {
-	case "debug":
-		return slog.LevelDebug
-	case "warn":
-		return slog.LevelWarn
-	case "error":
-		return slog.LevelError
-	default:
-		return slog.LevelInfo
 	}
 }

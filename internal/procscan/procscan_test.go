@@ -1,4 +1,4 @@
-package main
+package procscan
 
 import (
 	"context"
@@ -9,23 +9,16 @@ import (
 	"strconv"
 	"syscall"
 	"testing"
-)
 
-// ---------- helpers ----------
+	"github.com/anthony-spruyt/kata-tap-qdisc-fix/internal/qdisc"
+)
 
 func silentLogger() *slog.Logger {
 	return slog.New(slog.NewJSONHandler(io.Discard, nil))
 }
 
-// buildFakeProcTree creates a minimal /proc-like directory tree under root.
-//
-//	pids:    each entry creates /proc/<pid>/ with a symlink at ns/net pointing
-//	         to a "netns file" identified by netnsID (a synthetic unique name).
-//	nsFiles: map of netnsID → the actual file that will be the link target.
-//	         The function creates a real file for each unique nsID so that
-//	         syscall.Stat can resolve the inode.
-//
-// Returns a map from netnsID → inode so callers can build expectations.
+// buildFakeProcTree links <root>/<pid>/ns/net to one regular file per netns ID,
+// so Stat resolves shared IDs to the same inode. Returns netns ID to inode.
 func buildFakeProcTree(t *testing.T, root string, pidToNsID map[int]string) (nsIDToInode map[string]uint64) {
 	t.Helper()
 	nsDir := filepath.Join(root, "_netns_files")
@@ -33,7 +26,6 @@ func buildFakeProcTree(t *testing.T, root string, pidToNsID map[int]string) (nsI
 		t.Fatal(err)
 	}
 
-	// Create one real file per unique nsID.
 	nsIDToInode = make(map[string]uint64)
 	for _, nsID := range pidToNsID {
 		if _, ok := nsIDToInode[nsID]; ok {
@@ -50,7 +42,6 @@ func buildFakeProcTree(t *testing.T, root string, pidToNsID map[int]string) (nsI
 		nsIDToInode[nsID] = st.Ino
 	}
 
-	// Build /proc/<pid>/ns/net symlinks.
 	for pid, nsID := range pidToNsID {
 		pidStr := strconv.Itoa(pid)
 		nsSubdir := filepath.Join(root, pidStr, "ns")
@@ -66,31 +57,24 @@ func buildFakeProcTree(t *testing.T, root string, pidToNsID map[int]string) (nsI
 	return nsIDToInode
 }
 
-// ---------- tests ----------
-
-// TestProcScannerDedup verifies that 3 processes sharing 2 distinct netns
-// result in exactly 2 unique netns sweeps.
 func TestProcScannerDedup(t *testing.T) {
 	root := t.TempDir()
 
-	// PID 100 and 101 share nsA; PID 200 is in nsB.
 	pidToNsID := map[int]string{
 		100: "nsA",
 		101: "nsA",
 		200: "nsB",
 	}
-	nsIDToInode := buildFakeProcTree(t, root, pidToNsID)
+	buildFakeProcTree(t, root, pidToNsID)
 
-	// Use a hostInode that doesn't match any of our fake netns inodes.
 	const hostInode = uint64(999999999)
 
-	// countingOpener tracks how many times DoInNetns is called.
 	var sweepCount int
 	opener := &countingOpener{fn: func(_ string) { sweepCount++ }}
 
-	scanner := NewProcScanner(
+	scanner := New(
 		opener,
-		func() QdiscManager { return &fakeQdiscManager{links: nil} },
+		func() qdisc.Manager { return &fakeManager{links: nil} },
 		false,
 		silentLogger(),
 		hostInode,
@@ -114,16 +98,11 @@ func TestProcScannerDedup(t *testing.T) {
 	if result.HostSkipped != 0 {
 		t.Errorf("HostSkipped = %d, want 0", result.HostSkipped)
 	}
-	// Confirm we have entries for both nsIDs.
-	_ = nsIDToInode
 }
 
-// TestProcScannerSkipsHostNetns verifies that entries whose inode matches the
-// host netns inode are counted in HostSkipped and NOT swept.
 func TestProcScannerSkipsHostNetns(t *testing.T) {
 	root := t.TempDir()
 
-	// Two PIDs share nsA (will be treated as host). One PID in nsB.
 	pidToNsID := map[int]string{
 		1:   "nsA",
 		2:   "nsA",
@@ -135,9 +114,9 @@ func TestProcScannerSkipsHostNetns(t *testing.T) {
 	var sweepCount int
 	opener := &countingOpener{fn: func(_ string) { sweepCount++ }}
 
-	scanner := NewProcScanner(
+	scanner := New(
 		opener,
-		func() QdiscManager { return &fakeQdiscManager{links: nil} },
+		func() qdisc.Manager { return &fakeManager{links: nil} },
 		false,
 		silentLogger(),
 		hostInode,
@@ -160,14 +139,10 @@ func TestProcScannerSkipsHostNetns(t *testing.T) {
 	}
 }
 
-// TestProcScannerToleratesEnoent verifies that a /proc/<pid>/ns/net path that
-// disappears between ReadDir and Stat (simulating a transient proc entry) does
-// NOT cause Sweep to return an error — it logs debug and continues.
+// A process that exits between ReadDir and Stat must not fail the sweep.
 func TestProcScannerToleratesEnoent(t *testing.T) {
 	root := t.TempDir()
 
-	// PID 100 → nsA (stable). PID 200 → symlink to a non-existent target
-	// (simulates ENOENT).
 	nsDir := filepath.Join(root, "_netns_files")
 	if err := os.MkdirAll(nsDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -182,7 +157,6 @@ func TestProcScannerToleratesEnoent(t *testing.T) {
 	}
 	hostInode := uint64(999999999)
 
-	// Stable pid 100.
 	pid100ns := filepath.Join(root, "100", "ns")
 	if err := os.MkdirAll(pid100ns, 0o755); err != nil {
 		t.Fatal(err)
@@ -191,7 +165,7 @@ func TestProcScannerToleratesEnoent(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Transient pid 200 — symlink target does NOT exist.
+	// Dangling link: pid 200 exited.
 	pid200ns := filepath.Join(root, "200", "ns")
 	if err := os.MkdirAll(pid200ns, 0o755); err != nil {
 		t.Fatal(err)
@@ -203,9 +177,9 @@ func TestProcScannerToleratesEnoent(t *testing.T) {
 	var sweepCount int
 	opener := &countingOpener{fn: func(_ string) { sweepCount++ }}
 
-	scanner := NewProcScanner(
+	scanner := New(
 		opener,
-		func() QdiscManager { return &fakeQdiscManager{links: nil} },
+		func() qdisc.Manager { return &fakeManager{links: nil} },
 		false,
 		silentLogger(),
 		hostInode,
@@ -217,7 +191,6 @@ func TestProcScannerToleratesEnoent(t *testing.T) {
 		t.Fatalf("Sweep() returned error on ENOENT: %v", err)
 	}
 
-	// Only pid 100 should be swept (pid 200 silently skipped).
 	if sweepCount != 1 {
 		t.Errorf("DoInNetns called %d times, want 1", sweepCount)
 	}
@@ -226,8 +199,6 @@ func TestProcScannerToleratesEnoent(t *testing.T) {
 	}
 }
 
-// TestProcScannerCountsReplacements verifies that the ScanResult fields are
-// correctly aggregated across multiple netns.
 func TestProcScannerCountsReplacements(t *testing.T) {
 	root := t.TempDir()
 
@@ -235,26 +206,21 @@ func TestProcScannerCountsReplacements(t *testing.T) {
 		100: "nsA",
 		200: "nsB",
 	}
-	nsIDToInode := buildFakeProcTree(t, root, pidToNsID)
+	buildFakeProcTree(t, root, pidToNsID)
 
 	const hostInode = uint64(999999999)
 
-	// nsA has a tap0_kata with fq (will be replaced).
-	// nsB has no tap.
 	nsAPath := filepath.Join(root, "_netns_files", "nsA")
 	nsBPath := filepath.Join(root, "_netns_files", "nsB")
 
-	managerByFile := map[string]*fakeQdiscManager{
-		nsAPath: {links: []LinkInfo{{Name: "tap0_kata", RootQdiscType: "fq"}}},
-		nsBPath: {links: []LinkInfo{{Name: "eth0", RootQdiscType: "noqueue"}}},
+	managerByFile := map[string]*fakeManager{
+		nsAPath: {links: []qdisc.LinkInfo{{Name: "tap0_kata", RootQdiscType: "fq"}}},
+		nsBPath: {links: []qdisc.LinkInfo{{Name: "eth0", RootQdiscType: "noqueue"}}},
 	}
 
-	// The opener resolves which manager to use by the path passed to DoInNetns.
-	// Because Sweep uses the first pid's path (e.g. /proc/100/ns/net → symlink
-	// to nsA file), we need a smarter fake that reads through the symlink.
 	opener := &resolveOpener{managerByFile: managerByFile}
 
-	scanner := NewProcScanner(
+	scanner := New(
 		opener,
 		opener.factory(),
 		false,
@@ -277,11 +243,7 @@ func TestProcScannerCountsReplacements(t *testing.T) {
 	if result.TapsFound != 1 {
 		t.Errorf("TapsFound = %d, want 1", result.TapsFound)
 	}
-
-	_ = nsIDToInode
 }
-
-// ---------- countingOpener ----------
 
 type countingOpener struct {
 	fn func(path string)
@@ -292,32 +254,38 @@ func (c *countingOpener) DoInNetns(path string, fn func() error) error {
 	return fn()
 }
 
-// ---------- resolveOpener ----------
-// Opens a symlink path and resolves it to the real file, then delegates to a
-// per-real-file manager map. This mirrors what the real opener does (enter the
-// netns referred to by the path) in tests where we need per-netns managers.
-
+// resolveOpener "enters" a netns by resolving the ns/net link, so the factory
+// can hand out the manager for that netns.
 type resolveOpener struct {
-	managerByFile map[string]*fakeQdiscManager
+	managerByFile map[string]*fakeManager
 	current       string
 }
 
 func (r *resolveOpener) DoInNetns(path string, fn func() error) error {
-	// Resolve symlink so we get the canonical "_netns_files/nsX" path.
-	real, err := filepath.EvalSymlinks(path)
+	resolved, err := filepath.EvalSymlinks(path)
 	if err != nil {
-		real = path // fall back to literal path
+		resolved = path
 	}
-	r.current = real
+	r.current = resolved
 	return fn()
 }
 
-func (r *resolveOpener) factory() QdiscManagerFactory {
-	return func() QdiscManager {
+func (r *resolveOpener) factory() qdisc.ManagerFactory {
+	return func() qdisc.Manager {
 		mgr, ok := r.managerByFile[r.current]
 		if !ok {
-			return &fakeQdiscManager{links: nil}
+			return &fakeManager{links: nil}
 		}
 		return mgr
 	}
 }
+
+type fakeManager struct {
+	links []qdisc.LinkInfo
+}
+
+func (f *fakeManager) ListLinks() ([]qdisc.LinkInfo, error) {
+	return append([]qdisc.LinkInfo(nil), f.links...), nil
+}
+
+func (f *fakeManager) ReplaceRootWithPfifoFast(string) error { return nil }
