@@ -1,4 +1,4 @@
-package main
+package metrics
 
 import (
 	"github.com/prometheus/client_golang/prometheus"
@@ -10,7 +10,7 @@ type Metrics struct {
 	SweepsTotal          prometheus.Counter
 }
 
-func NewMetrics(reg prometheus.Registerer) *Metrics {
+func New(reg prometheus.Registerer) *Metrics {
 	m := &Metrics{
 		ReplacementsTotal: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "kata_tap_qdisc_replacements_total",

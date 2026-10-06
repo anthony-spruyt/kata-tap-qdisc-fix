@@ -1,17 +1,18 @@
-package main
+package config
 
 import (
-	"os"
+	"log/slog"
 	"testing"
 	"time"
 )
 
 func TestLoadConfigDefaults(t *testing.T) {
+	// Empty counts as unset in Load; t.Setenv also restores the caller's env.
 	for _, k := range []string{"DRY_RUN", "HEALTH_PORT", "METRICS_PORT", "NETNS_DIR", "LOG_LEVEL", "SWEEP_INTERVAL"} {
-		os.Unsetenv(k)
+		t.Setenv(k, "")
 	}
-	cfg := LoadConfig()
-	if cfg.DryRun != false {
+	cfg := Load()
+	if cfg.DryRun {
 		t.Errorf("DryRun = %v, want false", cfg.DryRun)
 	}
 	if cfg.HealthPort != 8080 {
@@ -39,7 +40,7 @@ func TestLoadConfigOverrides(t *testing.T) {
 	t.Setenv("LOG_LEVEL", "debug")
 	t.Setenv("SWEEP_INTERVAL", "60")
 
-	cfg := LoadConfig()
+	cfg := Load()
 	if !cfg.DryRun {
 		t.Errorf("DryRun = false, want true")
 	}
@@ -92,5 +93,21 @@ func TestValidateRejectsZeroSweepInterval(t *testing.T) {
 	cfg := Config{HealthPort: 8080, MetricsPort: 9102, NetnsDir: "/run/netns", LogLevel: "info", SweepInterval: 0}
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("expected error for SweepInterval 0")
+	}
+}
+
+func TestParseLevel(t *testing.T) {
+	cases := map[string]slog.Level{
+		"debug":   slog.LevelDebug,
+		"info":    slog.LevelInfo,
+		"warn":    slog.LevelWarn,
+		"error":   slog.LevelError,
+		"verbose": slog.LevelInfo,
+		"":        slog.LevelInfo,
+	}
+	for in, want := range cases {
+		if got := ParseLevel(in); got != want {
+			t.Errorf("ParseLevel(%q) = %v, want %v", in, got, want)
+		}
 	}
 }

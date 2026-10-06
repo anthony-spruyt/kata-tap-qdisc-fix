@@ -1,4 +1,4 @@
-package main
+package metrics
 
 import (
 	"testing"
@@ -8,7 +8,7 @@ import (
 
 func TestNewMetricsRegistersWithoutPanic(t *testing.T) {
 	reg := prometheus.NewRegistry()
-	m := NewMetrics(reg)
+	m := New(reg)
 	if m.ReplacementsTotal == nil || m.ReplaceFailuresTotal == nil || m.SweepsTotal == nil {
 		t.Fatal("one or more metrics are nil")
 	}

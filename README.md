@@ -13,16 +13,19 @@ Single proc-sweep loop — no fsnotify, no retry state:
 
 Deduplication is by netns inode, so shared-netns pods are visited exactly once regardless of how many `/proc/<pid>/ns/net` symlinks point to the same netns. The host netns (inode of `/proc/1/ns/net`) is always excluded.
 
-## Build
+## Layout
+
+- `cmd/kata-tap-qdisc-fix`: the daemon (the image entrypoint, `/kata-tap-qdisc-fix`)
+- `cmd/proc-scanner`: one-shot diagnostic that runs a single sweep and prints the counts; not in the image
+- `internal/procscan`: `/proc` walk, netns dedup and sweep
+- `internal/qdisc`: tap detection and the `fq` to `pfifo_fast` replacement over netlink
+- `internal/netns`: entering a netns on a locked OS thread and restoring the host netns
+- `internal/config`, `internal/metrics`, `internal/server`: environment, Prometheus counters, health and metrics servers
 
 ```bash
 go build ./...
-```
-
-## Test
-
-```bash
 go test -race ./...
+golangci-lint run
 ```
 
 ## Run locally (requires CAP_SYS_ADMIN + CAP_NET_ADMIN)
@@ -64,7 +67,11 @@ Alerting (PromQL):
 
 ## Releases
 
-Versioning is managed by release-please. See `docs/releases.md`.
+release-please opens a release PR from conventional commits. Merging it tags `vX.Y.Z` and creates a draft release. The image `ghcr.io/anthony-spruyt/kata-tap-qdisc-fix` is then built from the tag and pushed with an SBOM and provenance. The release is published only after the push succeeds.
+
+If the image job fails, the release stays a draft. Fix the cause, then run the **Rebuild Release** workflow with the version.
+
+Releases up to 0.2.14 were cut from [spruyt-labs](https://github.com/anthony-spruyt/spruyt-labs) as `kata-tap-qdisc-fix/vX.Y.Z`. Releases from this repo start at 1.0.0.
 
 ## Root cause reference
 

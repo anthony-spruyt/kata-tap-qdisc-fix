@@ -1,4 +1,4 @@
-package main
+package qdisc
 
 import (
 	"errors"
@@ -6,21 +6,21 @@ import (
 	"testing"
 )
 
-type fakeQdiscManager struct {
+type fakeManager struct {
 	mu            sync.Mutex
 	links         []LinkInfo
 	replaceCalls  []string
 	replaceErrors []error
 }
 
-func (f *fakeQdiscManager) ListLinks() ([]LinkInfo, error) {
+func (f *fakeManager) ListLinks() ([]LinkInfo, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	out := append([]LinkInfo(nil), f.links...)
 	return out, nil
 }
 
-func (f *fakeQdiscManager) ReplaceRootWithPfifoFast(dev string) error {
+func (f *fakeManager) ReplaceRootWithPfifoFast(dev string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.replaceCalls = append(f.replaceCalls, dev)
@@ -33,12 +33,12 @@ func (f *fakeQdiscManager) ReplaceRootWithPfifoFast(dev string) error {
 }
 
 func TestApplyReplacementReplacesFqOnKataTap(t *testing.T) {
-	f := &fakeQdiscManager{links: []LinkInfo{
+	f := &fakeManager{links: []LinkInfo{
 		{Name: "eth0", RootQdiscType: "noqueue"},
 		{Name: "tap0_kata", RootQdiscType: "fq"},
 		{Name: "lo", RootQdiscType: "noqueue"},
 	}}
-	res, err := ApplyReplacement(f, false)
+	res, err := Apply(f, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -51,10 +51,10 @@ func TestApplyReplacementReplacesFqOnKataTap(t *testing.T) {
 }
 
 func TestApplyReplacementSkipsNonFqTap(t *testing.T) {
-	f := &fakeQdiscManager{links: []LinkInfo{
+	f := &fakeManager{links: []LinkInfo{
 		{Name: "tap0_kata", RootQdiscType: "pfifo_fast"},
 	}}
-	res, err := ApplyReplacement(f, false)
+	res, err := Apply(f, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,11 +67,11 @@ func TestApplyReplacementSkipsNonFqTap(t *testing.T) {
 }
 
 func TestApplyReplacementSkipsNonKataTap(t *testing.T) {
-	f := &fakeQdiscManager{links: []LinkInfo{
+	f := &fakeManager{links: []LinkInfo{
 		{Name: "tap0_qemu", RootQdiscType: "fq"},
 		{Name: "tap", RootQdiscType: "fq"},
 	}}
-	res, err := ApplyReplacement(f, false)
+	res, err := Apply(f, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,10 +84,10 @@ func TestApplyReplacementSkipsNonKataTap(t *testing.T) {
 }
 
 func TestApplyReplacementDryRun(t *testing.T) {
-	f := &fakeQdiscManager{links: []LinkInfo{
+	f := &fakeManager{links: []LinkInfo{
 		{Name: "tap0_kata", RootQdiscType: "fq"},
 	}}
-	res, err := ApplyReplacement(f, true)
+	res, err := Apply(f, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,15 +103,14 @@ func TestApplyReplacementDryRun(t *testing.T) {
 }
 
 func TestApplyReplacementIsIdempotentInPractice(t *testing.T) {
-	f := &fakeQdiscManager{links: []LinkInfo{
+	f := &fakeManager{links: []LinkInfo{
 		{Name: "tap0_kata", RootQdiscType: "fq"},
 	}}
-	if _, err := ApplyReplacement(f, false); err != nil {
+	if _, err := Apply(f, false); err != nil {
 		t.Fatal(err)
 	}
-	// Simulate what the real kernel would do after the first call:
 	f.links[0].RootQdiscType = "pfifo_fast"
-	res, err := ApplyReplacement(f, false)
+	res, err := Apply(f, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,11 +127,11 @@ func TestApplyReplacementIsIdempotentInPractice(t *testing.T) {
 
 func TestApplyReplacementPropagatesError(t *testing.T) {
 	want := errors.New("boom")
-	f := &fakeQdiscManager{
+	f := &fakeManager{
 		links:         []LinkInfo{{Name: "tap0_kata", RootQdiscType: "fq"}},
 		replaceErrors: []error{want},
 	}
-	_, err := ApplyReplacement(f, false)
+	_, err := Apply(f, false)
 	if !errors.Is(err, want) {
 		t.Fatalf("error = %v, want wraps %v", err, want)
 	}
