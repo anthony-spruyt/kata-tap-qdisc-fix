@@ -3,7 +3,7 @@
 # This file is automatically updated - do not modify directly
 # The image pin lives in repo-operator (src/groups.yaml, or src/repos.yaml for a per-repo flavor), where Renovate bumps it
 
-MEGALINTER_IMAGE="ghcr.io/anthony-spruyt/megalinter-go:1.0.0@sha256:e4031431ee715a9f621fcb7cfbae056b60c5616e1ecb4d296142a713a537e6ff"
+MEGALINTER_IMAGE="ghcr.io/anthony-spruyt/megalinter-go:2.0.0@sha256:266bda79d4b1c145beed5dcbf1c8a8607f454d743cbbcf33c6e7d89cf90c2f98"
 
 SKIP_BOT_COMMITS=false
 
