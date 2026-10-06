@@ -1,4 +1,4 @@
-package main
+package qdisc
 
 import (
 	"fmt"
@@ -6,34 +6,30 @@ import (
 	"github.com/vishvananda/netlink"
 )
 
-// LinkInfo is a testable snapshot of a network interface relevant to
-// qdisc replacement decisions.
 type LinkInfo struct {
 	Name          string
 	RootQdiscType string
 }
 
-// QdiscManager abstracts netlink operations so tests can inject a fake.
-type QdiscManager interface {
+// Manager abstracts netlink so tests can inject a fake.
+type Manager interface {
 	ListLinks() ([]LinkInfo, error)
 	ReplaceRootWithPfifoFast(dev string) error
 }
 
-// QdiscManagerFactory constructs a QdiscManager for a single netns visit.
-type QdiscManagerFactory func() QdiscManager
+// ManagerFactory builds a Manager for one netns visit, after the thread has entered it.
+type ManagerFactory func() Manager
 
-// ReplacementResult reports what ApplyReplacement did (or would have done).
-type ReplacementResult struct {
+type Result struct {
 	Replaced     int
 	WouldReplace int
 	Skipped      int
 }
 
-// ApplyReplacement lists all links via m, and for every link whose name
-// matches IsKataTapDevice AND whose root qdisc is "fq", replaces the root
-// qdisc with pfifo_fast (or counts it in WouldReplace when dryRun is true).
-func ApplyReplacement(m QdiscManager, dryRun bool) (ReplacementResult, error) {
-	var res ReplacementResult
+// Apply replaces an fq root qdisc with pfifo_fast on every Kata tap in the
+// current netns, or only counts them when dryRun is set.
+func Apply(m Manager, dryRun bool) (Result, error) {
+	var res Result
 	links, err := m.ListLinks()
 	if err != nil {
 		return res, fmt.Errorf("list links: %w", err)
@@ -58,13 +54,12 @@ func ApplyReplacement(m QdiscManager, dryRun bool) (ReplacementResult, error) {
 	return res, nil
 }
 
-// realQdiscManager is the production implementation backed by netlink.
-// Must be called with the calling goroutine inside the target netns.
-type realQdiscManager struct{}
+// netlinkManager acts on the calling thread's netns.
+type netlinkManager struct{}
 
-func NewQdiscManager() QdiscManager { return realQdiscManager{} }
+func NewManager() Manager { return netlinkManager{} }
 
-func (realQdiscManager) ListLinks() ([]LinkInfo, error) {
+func (netlinkManager) ListLinks() ([]LinkInfo, error) {
 	links, err := netlink.LinkList()
 	if err != nil {
 		return nil, err
@@ -86,7 +81,7 @@ func (realQdiscManager) ListLinks() ([]LinkInfo, error) {
 	return out, nil
 }
 
-func (realQdiscManager) ReplaceRootWithPfifoFast(dev string) error {
+func (netlinkManager) ReplaceRootWithPfifoFast(dev string) error {
 	link, err := netlink.LinkByName(dev)
 	if err != nil {
 		return fmt.Errorf("link by name %s: %w", dev, err)

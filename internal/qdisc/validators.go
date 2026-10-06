@@ -1,20 +1,10 @@
-package main
+package qdisc
 
 import "regexp"
 
-var (
-	podNetnsNameRE  = regexp.MustCompile(`^cni-[0-9a-f][0-9a-f-]*$`)
-	kataTapDeviceRE = regexp.MustCompile(`^tap[0-9]+_kata$`)
-)
+var kataTapDeviceRE = regexp.MustCompile(`^tap[0-9]+_kata$`)
 
-// IsPodNetnsName reports whether name is a safe CNI-generated pod network
-// namespace filename (as seen under /run/netns).
-func IsPodNetnsName(name string) bool {
-	return podNetnsNameRE.MatchString(name)
-}
-
-// IsKataTapDevice reports whether ifname is a Kata CLH tap device
-// (tap<N>_kata where N is an unsigned integer).
+// IsKataTapDevice reports whether ifname is a Kata cloud-hypervisor tap (tap<N>_kata).
 func IsKataTapDevice(ifname string) bool {
 	return kataTapDeviceRE.MatchString(ifname)
 }

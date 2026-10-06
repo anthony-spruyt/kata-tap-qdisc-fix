@@ -1,7 +1,8 @@
-package main
+package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -13,36 +14,38 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
-type readyState struct{ ready atomic.Bool }
+type Ready struct{ ready atomic.Bool }
 
-func (r *readyState) markReady()    { r.ready.Store(true) }
-func (r *readyState) isReady() bool { return r.ready.Load() }
+func (r *Ready) MarkReady()    { r.ready.Store(true) }
+func (r *Ready) IsReady() bool { return r.ready.Load() }
 
-// startHealthServer listens on healthPort for /healthz and /readyz. Returns
-// a shutdown func callers should defer.
-func startHealthServer(healthPort int, state *readyState, logger *slog.Logger) func() {
+// StartHealth serves /healthz and /readyz on port and returns a shutdown func.
+func StartHealth(port int, ready *Ready, logger *slog.Logger) func() {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(200); _, _ = w.Write([]byte("ok")) })
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	})
 	mux.HandleFunc("/readyz", func(w http.ResponseWriter, _ *http.Request) {
-		if !state.isReady() {
-			w.WriteHeader(503)
+		if !ready.IsReady() {
+			w.WriteHeader(http.StatusServiceUnavailable)
 			_, _ = w.Write([]byte("not ready"))
 			return
 		}
-		w.WriteHeader(200)
+		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ready"))
 	})
-	return serveMux(healthPort, mux, logger, "health")
+	return serve(port, mux, logger, "health")
 }
 
-// startMetricsServer listens on metricsPort for /metrics.
-func startMetricsServer(metricsPort int, reg *prometheus.Registry, logger *slog.Logger) func() {
+// StartMetrics serves /metrics on port and returns a shutdown func.
+func StartMetrics(port int, reg *prometheus.Registry, logger *slog.Logger) func() {
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
-	return serveMux(metricsPort, mux, logger, "metrics")
+	return serve(port, mux, logger, "metrics")
 }
 
-func serveMux(port int, mux *http.ServeMux, logger *slog.Logger, kind string) func() {
+func serve(port int, mux *http.ServeMux, logger *slog.Logger, kind string) func() {
 	srv := &http.Server{Addr: fmt.Sprintf(":%d", port), Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 	ln, err := net.Listen("tcp", srv.Addr)
 	if err != nil {
@@ -50,7 +53,7 @@ func serveMux(port int, mux *http.ServeMux, logger *slog.Logger, kind string) fu
 		return func() {}
 	}
 	go func() {
-		if err := srv.Serve(ln); err != nil && err != http.ErrServerClosed {
+		if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			logger.Error("serve error", "server", kind, "error", err.Error())
 		}
 	}()

@@ -1,7 +1,9 @@
-package main
+package config
 
 import (
+	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"strconv"
 	"time"
@@ -16,7 +18,8 @@ type Config struct {
 	SweepInterval time.Duration
 }
 
-func LoadConfig() Config {
+// Load falls back to the default for unset and unparseable values alike.
+func Load() Config {
 	return Config{
 		DryRun:        envBool("DRY_RUN", false),
 		HealthPort:    envInt("HEALTH_PORT", 8080),
@@ -35,7 +38,7 @@ func (c Config) Validate() error {
 		return fmt.Errorf("METRICS_PORT must be 1..65535, got %d", c.MetricsPort)
 	}
 	if c.NetnsDir == "" {
-		return fmt.Errorf("NETNS_DIR must not be empty")
+		return errors.New("NETNS_DIR must not be empty")
 	}
 	switch c.LogLevel {
 	case "debug", "info", "warn", "error":
@@ -46,6 +49,19 @@ func (c Config) Validate() error {
 		return fmt.Errorf("SWEEP_INTERVAL must be > 0, got %v", c.SweepInterval)
 	}
 	return nil
+}
+
+func ParseLevel(s string) slog.Level {
+	switch s {
+	case "debug":
+		return slog.LevelDebug
+	case "warn":
+		return slog.LevelWarn
+	case "error":
+		return slog.LevelError
+	default:
+		return slog.LevelInfo
+	}
 }
 
 func envString(key, def string) string {

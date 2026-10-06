@@ -1,4 +1,4 @@
-package main
+package procscan
 
 import (
 	"context"
@@ -9,57 +9,46 @@ import (
 	"strconv"
 	"syscall"
 	"time"
+
+	"github.com/anthony-spruyt/kata-tap-qdisc-fix/internal/netns"
+	"github.com/anthony-spruyt/kata-tap-qdisc-fix/internal/qdisc"
 )
 
-// ScanResult summarises one Sweep pass through /proc.
-type ScanResult struct {
-	// TotalInodes is the number of /proc/<pid>/ns/net symlinks read (including
-	// duplicates — i.e. one per numeric /proc entry that was readable).
-	TotalInodes int
-	// UniqueNetns is the number of distinct netns inodes visited.
-	UniqueNetns int
-	// HostSkipped is the number of /proc/<pid>/ns/net entries that matched the
-	// host netns inode and were skipped.
-	HostSkipped int
-	// TapsFound is the total number of tap*_kata devices whose qdiscs were
-	// inspected (Replaced + WouldReplace + Skipped across all netns).
-	TapsFound int
-	// Replaced is the total number of qdiscs actually replaced.
-	Replaced int
-	// WouldReplace is the total number of qdiscs that would be replaced (dry-run).
+type Result struct {
+	// TotalInodes counts readable /proc/<pid>/ns/net entries, duplicates included.
+	TotalInodes  int
+	UniqueNetns  int
+	HostSkipped  int
+	TapsFound    int
+	Replaced     int
 	WouldReplace int
-	// Elapsed is the wall-time of the Sweep call.
-	Elapsed time.Duration
+	Elapsed      time.Duration
 }
 
-// ProcScanner walks /proc/*/ns/net, deduplicates by netns inode, and for each
-// unique netns that is not the host netns, invokes ApplyReplacement via the
-// same opener/factory pattern as Watcher. It is intentionally additive — the
-// existing Watcher is not modified.
-type ProcScanner struct {
-	opener    NetnsOpener
-	factory   QdiscManagerFactory
+// Scanner walks /proc/*/ns/net, deduplicates by netns inode, and applies the
+// qdisc fix once in every netns other than the host's.
+type Scanner struct {
+	opener    netns.Opener
+	factory   qdisc.ManagerFactory
 	dryRun    bool
 	logger    *slog.Logger
 	hostInode uint64
-	procRoot  string // injectable for tests; defaults to "/proc"
+	procRoot  string
 }
 
-// NewProcScanner creates a ProcScanner. hostInode is the inode of the host
-// netns (typically obtained by reading /proc/1/ns/net at startup). procRoot is
-// the root of the proc filesystem ("/proc" in production; overridable in tests).
-func NewProcScanner(
-	opener NetnsOpener,
-	factory QdiscManagerFactory,
+// New returns a Scanner; an empty procRoot means "/proc".
+func New(
+	opener netns.Opener,
+	factory qdisc.ManagerFactory,
 	dryRun bool,
 	logger *slog.Logger,
 	hostInode uint64,
 	procRoot string,
-) *ProcScanner {
+) *Scanner {
 	if procRoot == "" {
 		procRoot = "/proc"
 	}
-	return &ProcScanner{
+	return &Scanner{
 		opener:    opener,
 		factory:   factory,
 		dryRun:    dryRun,
@@ -69,12 +58,9 @@ func NewProcScanner(
 	}
 }
 
-// HostNetnsInode reads the inode of the host network namespace from
-// /proc/<pid>/ns/net. When pid is 0, reads /proc/self/ns/net instead —
-// which is what we use in production because the container's
-// runtime.default OCI spec masks /proc/<other-pid>/ns/* even with
-// hostPID=true + CAP_SYS_ADMIN. /proc/self/ns/* is never masked, and
-// because the pod runs hostNetwork=true, self-netns equals host-netns.
+// HostNetnsInode stats /proc/<pid>/ns/net, or /proc/self/ns/net when pid is 0.
+// Production passes 0: the runtime/default OCI spec masks /proc/<other>/ns/*,
+// and with hostNetwork the daemon's own netns is the host's.
 func HostNetnsInode(procRoot string, pid int) (uint64, error) {
 	var path string
 	if pid == 0 {
@@ -82,55 +68,48 @@ func HostNetnsInode(procRoot string, pid int) (uint64, error) {
 	} else {
 		path = filepath.Join(procRoot, strconv.Itoa(pid), "ns", "net")
 	}
-	var st syscall.Stat_t
-	if err := syscall.Stat(path, &st); err != nil {
+	ino, err := inodeOf(path)
+	if err != nil {
 		return 0, fmt.Errorf("stat %s: %w", path, err)
 	}
-	return st.Ino, nil
+	return ino, nil
 }
 
-// Sweep walks procRoot/*/ns/net, deduplicates by inode, and runs
-// ApplyReplacement in each unique non-host netns.
-func (p *ProcScanner) Sweep(ctx context.Context) (ScanResult, error) {
+func (s *Scanner) Sweep(ctx context.Context) (Result, error) {
 	start := time.Now()
-	var result ScanResult
+	var result Result
 
-	entries, err := os.ReadDir(p.procRoot)
+	entries, err := os.ReadDir(s.procRoot)
 	if err != nil {
-		return result, fmt.Errorf("readdir %s: %w", p.procRoot, err)
+		return result, fmt.Errorf("readdir %s: %w", s.procRoot, err)
 	}
 
-	// Map: inode → representative /proc/<pid>/ns/net path for that netns.
-	// We use the first pid we encounter for a given inode.
 	seen := make(map[uint64]string, 256)
 
 	for _, entry := range entries {
 		if ctx.Err() != nil {
 			return result, ctx.Err()
 		}
-		// Only numeric directory names are PIDs.
 		if !isPidEntry(entry) {
 			continue
 		}
 
-		nsPath := filepath.Join(p.procRoot, entry.Name(), "ns", "net")
+		nsPath := filepath.Join(s.procRoot, entry.Name(), "ns", "net")
 		inode, err := inodeOf(nsPath)
 		if err != nil {
-			// ENOENT / ESRCH: process exited between ReadDir and Stat — benign.
-			p.logger.Debug("proc netns stat failed; process likely exited",
+			s.logger.Debug("proc netns stat failed; process likely exited",
 				"pid", entry.Name(), "error", err.Error())
 			continue
 		}
 
 		result.TotalInodes++
 
-		if inode == p.hostInode {
+		if inode == s.hostInode {
 			result.HostSkipped++
 			continue
 		}
 
 		if _, alreadySeen := seen[inode]; alreadySeen {
-			// Duplicate — same netns shared by another proc entry.
 			continue
 		}
 		seen[inode] = nsPath
@@ -138,20 +117,19 @@ func (p *ProcScanner) Sweep(ctx context.Context) (ScanResult, error) {
 
 	result.UniqueNetns = len(seen)
 
-	// Now visit each unique netns.
 	for inode, nsPath := range seen {
 		if ctx.Err() != nil {
 			return result, ctx.Err()
 		}
 
-		var res ReplacementResult
-		err := p.opener.DoInNetns(nsPath, func() error {
+		var res qdisc.Result
+		err := s.opener.DoInNetns(nsPath, func() error {
 			var applyErr error
-			res, applyErr = ApplyReplacement(p.factory(), p.dryRun)
+			res, applyErr = qdisc.Apply(s.factory(), s.dryRun)
 			return applyErr
 		})
 		if err != nil {
-			p.logger.Debug("sweep: enter netns failed; skipping",
+			s.logger.Debug("sweep: enter netns failed; skipping",
 				"inode", inode, "path", nsPath, "error", err.Error())
 			continue
 		}
@@ -161,10 +139,10 @@ func (p *ProcScanner) Sweep(ctx context.Context) (ScanResult, error) {
 		result.WouldReplace += res.WouldReplace
 
 		if res.Replaced > 0 {
-			p.logger.Info("proc sweep: qdisc replaced",
+			s.logger.Info("proc sweep: qdisc replaced",
 				"inode", inode, "path", nsPath, "replaced", res.Replaced)
 		} else if res.WouldReplace > 0 {
-			p.logger.Info("proc sweep: qdisc would replace (dry-run)",
+			s.logger.Info("proc sweep: qdisc would replace (dry-run)",
 				"inode", inode, "path", nsPath, "would_replace", res.WouldReplace)
 		}
 	}
@@ -173,8 +151,6 @@ func (p *ProcScanner) Sweep(ctx context.Context) (ScanResult, error) {
 	return result, nil
 }
 
-// isPidEntry returns true when the DirEntry represents a numeric directory
-// name (i.e. a PID under /proc).
 func isPidEntry(e os.DirEntry) bool {
 	if !e.IsDir() {
 		return false
@@ -185,15 +161,12 @@ func isPidEntry(e os.DirEntry) bool {
 			return false
 		}
 	}
-	return len(name) > 0
+	return name != ""
 }
 
-// inodeOf returns the inode of the file at path via syscall.Stat.
-// For /proc/<pid>/ns/net this resolves through the symlink to the actual
-// netns inode — which is what we want for deduplication.
+// inodeOf uses Stat, not Lstat: the inode behind the ns/net symlink identifies the netns.
 func inodeOf(path string) (uint64, error) {
 	var st syscall.Stat_t
-	// syscall.Stat follows symlinks (unlike Lstat), so we get the netns inode.
 	if err := syscall.Stat(path, &st); err != nil {
 		return 0, err
 	}
