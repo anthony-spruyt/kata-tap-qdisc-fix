@@ -50,7 +50,9 @@ func serve(port int, mux *http.ServeMux, logger *slog.Logger, kind string) func(
 	ln, err := net.Listen("tcp", srv.Addr)
 	if err != nil {
 		logger.Error("listen failed", "server", kind, "addr", srv.Addr, "error", err.Error())
-		return func() {}
+		return func() {
+			// No-op: the listener never opened, so there is no server to shut down.
+		}
 	}
 	go func() {
 		if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
