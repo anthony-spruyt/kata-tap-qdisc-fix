@@ -22,10 +22,18 @@ jobs:
     uses: "anthony-spruyt/repo-operator/.github/workflows/_build-image.yaml@8e7d66f8fd86d59d9b65b28d567844821bea019e"
     with:
       language: "go"
+  repo:
+    needs:
+      - "lint"
+    permissions:
+      contents: "read"
+    uses: "./.github/workflows/ci-repo.yaml"
+    secrets: "inherit"
   summary:
     needs:
       - "lint"
       - "image"
+      - "repo"
     if: "always()"
     permissions:
       actions: "read"
