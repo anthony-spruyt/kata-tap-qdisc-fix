@@ -76,3 +76,5 @@ Releases up to 0.2.14 were cut from [spruyt-labs](https://github.com/anthony-spr
 ## Root cause reference
 
 See issue anthony-spruyt/spruyt-labs#951 for the packet-trace evidence and anthony-spruyt/spruyt-labs#959 for the proc-enumeration spike results.
+
+Merge gate smoke test line; safe to remove.
