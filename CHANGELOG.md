@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.1](https://github.com/anthony-spruyt/kata-tap-qdisc-fix/compare/v1.0.0...v1.0.1) (2026-10-15)
+
+
+### Bug Fixes
+
+* **deps:** update module github.com/prometheus/client_golang to v1.25.0 ([#26](https://github.com/anthony-spruyt/kata-tap-qdisc-fix/issues/26)) ([321fdab](https://github.com/anthony-spruyt/kata-tap-qdisc-fix/commit/321fdab1c9272380417d8b310e209e8bd5694e0b))
+
 ## 1.0.0 (2026-10-06)
 
 
