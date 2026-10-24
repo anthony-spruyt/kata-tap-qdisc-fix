@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.3](https://github.com/anthony-spruyt/kata-tap-qdisc-fix/compare/v1.0.2...v1.0.3) (2026-10-24)
+
+
+### Bug Fixes
+
+* publish an image built with Go 1.27.3 ([#42](https://github.com/anthony-spruyt/kata-tap-qdisc-fix/issues/42)) ([829b845](https://github.com/anthony-spruyt/kata-tap-qdisc-fix/commit/829b845b30cd2f4c3534f0827b41b493249826a8))
+
 ## [1.0.2](https://github.com/anthony-spruyt/kata-tap-qdisc-fix/compare/v1.0.1...v1.0.2) (2026-10-23)
 
 
