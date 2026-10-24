@@ -69,7 +69,7 @@ Alerting (PromQL):
 
 release-please opens a release PR from conventional commits. Merging it tags `vX.Y.Z` and creates a draft release. The image `ghcr.io/anthony-spruyt/kata-tap-qdisc-fix` is then built from the tag and pushed with an SBOM and provenance. The release is published only after the push succeeds.
 
-If the image job fails, the release stays a draft. Fix the cause, then run the **Rebuild Release** workflow with the version.
+If the image job fails, the release stays a draft. When only the image job failed and the cause lies outside the commit (a registry outage, a flaky runner, a missing secret), fix it and use **Re-run failed jobs** (not Re-run all jobs) on the release run. Otherwise, merge the fix and cut the next release, then delete the leftover draft.
 
 Releases up to 0.2.14 were cut from [spruyt-labs](https://github.com/anthony-spruyt/spruyt-labs) as `kata-tap-qdisc-fix/vX.Y.Z`. Releases from this repo start at 1.0.0.
 
