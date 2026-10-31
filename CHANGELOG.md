@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.4](https://github.com/anthony-spruyt/kata-tap-qdisc-fix/compare/v1.0.3...v1.0.4) (2026-10-31)
+
+
+### Bug Fixes
+
+* **deps:** update container image gcr.io/distroless/static to 18f4cc2 ([#46](https://github.com/anthony-spruyt/kata-tap-qdisc-fix/issues/46)) ([cf9df45](https://github.com/anthony-spruyt/kata-tap-qdisc-fix/commit/cf9df458195daaae455d68857057a44d334486e3))
+
 ## [1.0.3](https://github.com/anthony-spruyt/kata-tap-qdisc-fix/compare/v1.0.2...v1.0.3) (2026-10-24)
 
 
