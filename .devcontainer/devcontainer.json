@@ -40,10 +40,10 @@
       "gojqVersion": "0.12.20"
     },
     "ghcr.io/devcontainers/features/go": {
-      "version": "1.27.3"
+      "version": "1.27.4"
     },
     "ghcr.io/devcontainers-extra/features/renovate-cli": {
-      "version": "44.222.5"
+      "version": "44.240.0"
     }
   },
   "initializeCommand": "bash ${localWorkspaceFolder}/.devcontainer/initialize.sh",
